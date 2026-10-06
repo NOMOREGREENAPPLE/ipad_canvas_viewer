@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>캔버스 뷰어</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    
+    #viewer-container {
+      position: relative; width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #art-image {
+      max-width: 100%; max-height: 100%; object-fit: contain;
+    }
+    
+    /* 3x3 (9등분) 격자 오버레이 */
+    .grid-overlay {
+      position: absolute; inset: 0; pointer-events: none;
+      display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
+    }
+    .grid-cell {
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      box-shadow: inset 0 0 1px rgba(0, 0, 0, 0.4);
+    }
+    
+    /* 제어 버튼 패널 */
+    .controls {
+      position: absolute; bottom: 20px; right: 20px; display: flex; gap: 10px;
+    }
+    button {
+      padding: 10px 16px; background: rgba(30, 30, 30, 0.8);
+      color: #fff; border: 1px solid #666; border-radius: 8px; font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewer-container">
+    <img id="art-image" src="" alt="참고 사진">
+    <div id="grid" class="grid-overlay">
+      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button onclick="toggleGrid()">격자 ON/OFF</button>
+    <button onclick="toggleGrayscale()">흑백 모드</button>
+    <button onclick="fetchLatestImage()">새로고침</button>
+  </div>
+
+  <script>
+    // 1. 화면 꺼짐 방지
+    async function enableWakeLock() {
+      try {
+        if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
+      } catch (err) {}
+    }
+    window.addEventListener('click', enableWakeLock, { once: true });
+
+    // 2. 최신 이미지 불러오기 (캐시 방지용 파라미터 추가)
+    const IMAGE_URL = 'YOUR_SUPABASE_STORAGE_PUBLIC_URL/latest.jpg';
+    function fetchLatestImage() {
+      document.getElementById('art-image').src = `${IMAGE_URL}?t=${Date.now()}`;
+    }
+
+    function toggleGrid() {
+      const g = document.getElementById('grid');
+      g.style.display = g.style.display === 'none' ? 'grid' : 'none';
+    }
+
+    function toggleGrayscale() {
+      const img = document.getElementById('art-image');
+      img.style.filter = img.style.filter ? '' : 'grayscale(100%)';
+    }
+
+    fetchLatestImage();
+  </script>
+</body>
+</html>
