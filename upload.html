@@ -2,83 +2,178 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>캔버스 뷰어</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>아이패드로 사진 보내기</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body, html { width: 100%; height: 100%; overflow: hidden; background: #000; }
-    
-    #viewer-container {
-      position: relative; width: 100%; height: 100%;
-      display: flex; align-items: center; justify-content: center;
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #f4f6f8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
     }
-    #art-image {
-      max-width: 100%; max-height: 100%; object-fit: contain;
+    .card {
+      background: #ffffff;
+      width: 100%;
+      max-width: 420px;
+      padding: 32px 24px;
+      border-radius: 24px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+      text-align: center;
     }
-    
-    /* 3x3 (9등분) 격자 오버레이 */
-    .grid-overlay {
-      position: absolute; inset: 0; pointer-events: none;
-      display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #222;
+      margin-bottom: 24px;
     }
-    .grid-cell {
-      border: 1px solid rgba(255, 255, 255, 0.4);
-      box-shadow: inset 0 0 1px rgba(0, 0, 0, 0.4);
+    /* 숨겨진 실제 input */
+    #fileInput { display: none; }
+
+    /* 크고 누르기 편한 사진 선택 버튼 */
+    .file-btn {
+      display: block;
+      width: 100%;
+      padding: 18px;
+      background-color: #f0f3f8;
+      color: #333;
+      font-size: 19px;
+      font-weight: 600;
+      border-radius: 16px;
+      border: 2px dashed #b8c4d4;
+      cursor: pointer;
+      margin-bottom: 18px;
     }
-    
-    /* 제어 버튼 패널 */
-    .controls {
-      position: absolute; bottom: 20px; right: 20px; display: flex; gap: 10px;
+
+    /* 선택된 사진 미리보기 영역 */
+    #preview-container {
+      width: 100%;
+      height: 220px;
+      border-radius: 14px;
+      overflow: hidden;
+      display: none;
+      margin-bottom: 18px;
+      background: #eee;
     }
-    button {
-      padding: 10px 16px; background: rgba(30, 30, 30, 0.8);
-      color: #fff; border: 1px solid #666; border-radius: 8px; font-size: 14px;
+    #preview {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #222;
+    }
+
+    /* 전송 버튼 */
+    .send-btn {
+      width: 100%;
+      padding: 20px;
+      background-color: #2563eb;
+      color: #ffffff;
+      font-size: 20px;
+      font-weight: 700;
+      border: none;
+      border-radius: 16px;
+      cursor: pointer;
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+      transition: background 0.2s, transform 0.1s;
+    }
+    .send-btn:active {
+      transform: scale(0.98);
+      background-color: #1d4ed8;
+    }
+    .send-btn:disabled {
+      background-color: #94a3b8;
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+
+    /* 전송 상태 문구 */
+    #status {
+      margin-top: 18px;
+      font-size: 16px;
+      font-weight: 600;
+      min-height: 24px;
     }
   </style>
 </head>
 <body>
-  <div id="viewer-container">
-    <img id="art-image" src="" alt="참고 사진">
-    <div id="grid" class="grid-overlay">
-      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
-      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+  <div class="card">
+    <h1>🎨 아이패드로 사진 전송</h1>
+
+    <input type="file" id="fileInput" accept="image/*">
+    <label for="fileInput" class="file-btn" id="fileBtnLabel">📷 사진 선택하기</label>
+
+    <div id="preview-container">
+      <img id="preview" src="" alt="미리보기">
     </div>
+
+    <button id="submitBtn" class="send-btn" onclick="uploadImage()">아이패드로 보내기</button>
+    <div id="status"></div>
   </div>
 
-  <div class="controls">
-    <button onclick="toggleGrid()">격자 ON/OFF</button>
-    <button onclick="toggleGrayscale()">흑백 모드</button>
-    <button onclick="fetchLatestImage()">새로고침</button>
-  </div>
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-  <script>
-    // 1. 화면 꺼짐 방지
-    async function enableWakeLock() {
+    // 본인의 Supabase 설정값 (URL 끝에 /rest/v1/ 없는 형태 유지)
+    const SUPABASE_URL = 'https://jklaeltxgptsredzhiof.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_FcNQYW5uYOlAMiJblrSGIQ_nUc8QS6G';
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const fileInput = document.getElementById('fileInput');
+    const previewContainer = document.getElementById('preview-container');
+    const preview = document.getElementById('preview');
+    const fileBtnLabel = document.getElementById('fileBtnLabel');
+    const submitBtn = document.getElementById('submitBtn');
+    const statusText = document.getElementById('status');
+
+    // 사진 선택 시 미리보기 표시
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        preview.src = URL.createObjectURL(file);
+        previewContainer.style.display = 'block';
+        fileBtnLabel.innerText = '🔄 다른 사진 선택하기';
+        statusText.innerText = '';
+      }
+    });
+
+    // 업로드 실행
+    window.uploadImage = async function() {
+      const file = fileInput.files[0];
+      if (!file) {
+        alert('먼저 사진을 선택해주세요!');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerText = '전송 중...';
+      statusText.style.color = '#2563eb';
+      statusText.innerText = '아이패드로 전송하고 있습니다. 잠시만 기다려주세요.';
+
       try {
-        if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
-      } catch (err) {}
-    }
-    window.addEventListener('click', enableWakeLock, { once: true });
+        // 동일 파일명(latest.jpg)으로 덮어쓰기
+        const { error } = await supabase.storage.from('drawings').upload('latest.jpg', file, {
+          upsert: true
+        });
 
-    // 2. 최신 이미지 불러오기 (캐시 방지용 파라미터 추가)
-    const IMAGE_URL = 'YOUR_SUPABASE_STORAGE_PUBLIC_URL/latest.jpg';
-    function fetchLatestImage() {
-      document.getElementById('art-image').src = `${IMAGE_URL}?t=${Date.now()}`;
-    }
+        if (error) throw error;
 
-    function toggleGrid() {
-      const g = document.getElementById('grid');
-      g.style.display = g.style.display === 'none' ? 'grid' : 'none';
-    }
-
-    function toggleGrayscale() {
-      const img = document.getElementById('art-image');
-      img.style.filter = img.style.filter ? '' : 'grayscale(100%)';
-    }
-
-    fetchLatestImage();
+        statusText.style.color = '#16a34a';
+        statusText.innerText = '✅ 전송 완료! 아이패드 화면을 확인하세요.';
+        alert('아이패드로 전송이 완료되었습니다!');
+      } catch (err) {
+        console.error(err);
+        statusText.style.color = '#dc2626';
+        statusText.innerText = '❌ 전송 실패: 다시 시도해주세요.';
+        alert('전송 중 오류가 발생했습니다: ' + err.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerText = '아이패드로 보내기';
+      }
+    };
   </script>
 </body>
 </html>

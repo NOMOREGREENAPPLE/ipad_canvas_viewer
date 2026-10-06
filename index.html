@@ -1,18 +1,152 @@
-<input type="file" id="fileInput" accept="image/*" capture="environment">
-<button onclick="uploadImage()">아이패드로 전송</button>
-
-<script type="module">
-  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-  const supabase = createClient('https://jklaeltxgptsredzhiof.supabase.co', 'sb_publishable_FcNQYW5uYOlAMiJblrSGIQ_nUc8QS6G')
-
-  async function uploadImage() {
-    const file = document.getElementById('fileInput').files[0]
-    if (!file) return alert('사진을 선택해주세요!')
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>캔버스 뷰어</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000000;
+      user-select: none;
+      -webkit-user-select: none;
+    }
     
-    // 항상 동일한 이름(latest.jpg)으로 덮어쓰거나, 타임스탬프를 붙여 업로드
-    const { error } = await supabase.storage.from('drawings').upload('latest.jpg', file, {
-      upsert: true
-    })
-    if (!error) alert('아이패드로 전송 완료되었습니다!')
-  }
-</script>
+    #viewer-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #art-image {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+    }
+
+    /* 3x3 격자 오버레이 */
+    .grid-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+    }
+    .grid-cell {
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      box-shadow: inset 0 0 1px rgba(0, 0, 0, 0.6);
+    }
+
+    /* 좌하단 제어 버튼 패널 (자동 숨김) */
+    .controls {
+      position: absolute;
+      bottom: 24px;
+      left: 24px;
+      display: flex;
+      gap: 12px;
+      z-index: 50;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease;
+    }
+
+    /* 화면 터치 시 활성화 */
+    .controls.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    button {
+      padding: 14px 22px;
+      background: rgba(20, 20, 20, 0.75);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:active {
+      background: rgba(60, 60, 60, 0.9);
+    }
+  </style>
+</head>
+<body>
+  <div id="viewer-container" onclick="handleScreenTap(event)">
+    <img id="art-image" src="" alt="참고 사진">
+    
+    <div id="grid" class="grid-overlay">
+      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+      <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
+    </div>
+
+    <!-- 좌측 하단 버튼 패널 (흑백모드 제거됨) -->
+    <div id="controls" class="controls">
+      <button onclick="toggleGrid(event)">격자 ON/OFF</button>
+      <button onclick="fetchLatestImage(event)">새로고침</button>
+    </div>
+  </div>
+
+  <script>
+    // 본인의 Supabase 스토리지 공개 이미지 URL
+    const IMAGE_URL = 'https://jklaeltxgptsredzhiof.supabase.co/storage/v1/object/public/drawings/latest.jpg';
+
+    const controls = document.getElementById('controls');
+    let hideTimer = null;
+
+    // 1. 화면 터치 시 버튼 표시 & 3초 뒤 자동 사라짐
+    function showControls() {
+      controls.classList.add('visible');
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        controls.classList.remove('visible');
+      }, 3000); // 3초 후 자동 숨김
+    }
+
+    function handleScreenTap(e) {
+      // 버튼 클릭 시 이벤트 전파 차단되므로 여기는 화면 바탕 터치 시 실행
+      enableWakeLock();
+      showControls();
+    }
+
+    // 2. 화면 꺼짐 방지 (Wake Lock)
+    async function enableWakeLock() {
+      try {
+        if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
+      } catch (err) {}
+    }
+
+    // 3. 최신 이미지 갱신
+    function fetchLatestImage(e) {
+      if (e) e.stopPropagation();
+      showControls(); // 버튼 누르면 타이머 연장
+      const img = document.getElementById('art-image');
+      img.src = `${IMAGE_URL}?t=${Date.now()}`;
+    }
+
+    // 4. 3x3 격자 토글
+    function toggleGrid(e) {
+      if (e) e.stopPropagation();
+      showControls();
+      const g = document.getElementById('grid');
+      g.style.display = g.style.display === 'none' ? 'grid' : 'none';
+    }
+
+    // 초기 실행
+    fetchLatestImage();
+  </script>
+</body>
+</html>
