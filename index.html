@@ -15,9 +15,10 @@
       background: #000000;
       user-select: none;
       -webkit-user-select: none;
+      touch-action: none; /* 브라우저 기본 제스처 방지 */
     }
     
-    /* 화면 전체 중앙 정렬 영역 */
+    /* 뷰어 최외곽 컨테이너 */
     #viewer-container {
       position: relative;
       width: 100vw;
@@ -26,30 +27,27 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: hidden;
     }
 
-    /* 사진의 실제 표시 크기만큼만 딱 맞춰지는 래퍼 */
+    /* 줌 및 이동이 적용되는 레이어 */
     #image-wrapper {
       position: relative;
       display: inline-block;
-      line-height: 0; /* 이미지 하단 미세 여백 제거 */
-      max-width: 100vw;
-      max-height: 100vh;
-      max-height: 100dvh;
+      line-height: 0;
+      transform-origin: center center;
+      will-change: transform;
     }
 
-    /* 화면에 맞게 비율 유지하며 줄어드는 이미지 */
     #art-image {
       display: block;
-      max-width: 100vw;
-      max-height: 100vh;
-      max-height: 100dvh;
-      width: auto;
-      height: auto;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
       pointer-events: none;
     }
 
-    /* 사진 크기에 정확히 1:1로 일치하는 3x3 격자 */
+    /* 사진 비율에 정확히 밀착되는 3x3 격자 */
     .grid-overlay {
       position: absolute;
       inset: 0;
@@ -57,31 +55,24 @@
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       grid-template-rows: repeat(3, 1fr);
-      border: 1.5px solid rgba(255, 255, 255, 0.7); /* 사진 외곽선 */
+      border: 1.5px solid rgba(255, 255, 255, 0.7);
     }
 
     .grid-cell {
       border-right: 1.5px solid rgba(255, 255, 255, 0.6);
       border-bottom: 1.5px solid rgba(255, 255, 255, 0.6);
-      /* 흰색 배경이나 어두운 배경 어디서든 선이 보이도록 그림자 추가 */
       box-shadow: 1px 1px 2px rgba(0, 0, 0, 0.6);
     }
+    .grid-cell:nth-child(3n) { border-right: none; }
+    .grid-cell:nth-child(n+7) { border-bottom: none; }
 
-    /* 외곽 테두리와 겹쳐 두꺼워지는 현상 방지 */
-    .grid-cell:nth-child(3n) {
-      border-right: none;
-    }
-    .grid-cell:nth-child(n+7) {
-      border-bottom: none;
-    }
-
-    /* 좌하단 제어 버튼 패널 (화면 기준 고정 & 자동 숨김) */
+    /* 좌하단 제어 버튼 패널 (자동 숨김) */
     .controls {
       position: absolute;
       bottom: 24px;
       left: 24px;
       display: flex;
-      gap: 12px;
+      gap: 10px;
       z-index: 50;
       opacity: 0;
       pointer-events: none;
@@ -94,7 +85,7 @@
     }
 
     button {
-      padding: 14px 22px;
+      padding: 14px 20px;
       background: rgba(20, 20, 20, 0.75);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
@@ -111,12 +102,10 @@
   </style>
 </head>
 <body>
-  <div id="viewer-container" onclick="handleScreenTap(event)">
-    <!-- 사진 크기에 딱 맞게 감싸는 영역 -->
+  <div id="viewer-container">
     <div id="image-wrapper">
       <img id="art-image" src="" alt="참고 사진">
       
-      <!-- 사진과 완전히 같은 크기로 쳐지는 3x3 격자선 -->
       <div id="grid" class="grid-overlay">
         <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
         <div class="grid-cell"></div><div class="grid-cell"></div><div class="grid-cell"></div>
@@ -124,21 +113,128 @@
       </div>
     </div>
 
-    <!-- 좌측 하단 버튼 패널 (화면 모서리에 유지됨) -->
+    <!-- 좌하단 버튼 패널 -->
     <div id="controls" class="controls">
       <button onclick="toggleGrid(event)">격자 ON/OFF</button>
       <button onclick="fetchLatestImage(event)">새로고침</button>
+      <button onclick="resetZoom(event)">원래 크기로</button>
     </div>
   </div>
 
   <script>
-    // 본인의 Supabase 스토리지 공개 이미지 URL 유지
+    // 본인의 Supabase 스토리지 공개 이미지 URL
     const IMAGE_URL = 'https://jklaeltxgptsredzhiof.supabase.co/storage/v1/object/public/drawings/latest.jpg';
 
+    const container = document.getElementById('viewer-container');
+    const wrapper = document.getElementById('image-wrapper');
+    const img = document.getElementById('art-image');
     const controls = document.getElementById('controls');
+
     let hideTimer = null;
 
-    // 화면 터치 시 버튼 표시 & 3초 뒤 자동 사라짐
+    // 변환(Zoom/Pan) 관련 변수
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    let startX = 0, startY = 0;
+    let initialDistance = 0;
+    let initialScale = 1;
+    let hasMoved = false;
+
+    // 1. 화면 크기에 맞게 꽉 채우기 (종횡비 유지 + 레터박스)
+    function fitImageToScreen() {
+      if (!img.naturalWidth || !img.naturalHeight) return;
+
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const imgRatio = img.naturalWidth / img.naturalHeight;
+      const screenRatio = vw / vh;
+
+      let w, h;
+      if (imgRatio > screenRatio) {
+        w = vw;
+        h = vw / imgRatio;
+      } else {
+        h = vh;
+        w = vh * imgRatio;
+      }
+
+      wrapper.style.width = `${w}px`;
+      wrapper.style.height = `${h}px`;
+    }
+
+    img.onload = () => {
+      fitImageToScreen();
+      resetZoom();
+    };
+    window.addEventListener('resize', fitImageToScreen);
+
+    // 2. 변환 적용 함수
+    function applyTransform(animate = false) {
+      wrapper.style.transition = animate ? 'transform 0.25s ease-out' : 'none';
+      wrapper.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    }
+
+    // 3. 원래 크기로 복귀
+    window.resetZoom = function(e) {
+      if (e) e.stopPropagation();
+      showControls();
+      scale = 1;
+      translateX = 0;
+      translateY = 0;
+      applyTransform(true);
+    };
+
+    // 4. 제스처(터치 핀치 줌 & 드래그 이동)
+    container.addEventListener('touchstart', (e) => {
+      if (e.target.closest('#controls')) return;
+      hasMoved = false;
+
+      if (e.touches.length === 1) {
+        startX = e.touches[0].clientX - translateX;
+        startY = e.touches[0].clientY - translateY;
+      } else if (e.touches.length === 2) {
+        initialDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initialScale = scale;
+      }
+    }, { passive: false });
+
+    container.addEventListener('touchmove', (e) => {
+      if (e.target.closest('#controls')) return;
+      e.preventDefault();
+
+      if (e.touches.length === 1 && scale > 1) {
+        hasMoved = true;
+        translateX = e.touches[0].clientX - startX;
+        translateY = e.touches[0].clientY - startY;
+        applyTransform(false);
+      } else if (e.touches.length === 2) {
+        hasMoved = true;
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        scale = Math.min(Math.max(1, initialScale * (dist / initialDistance)), 6);
+        if (scale === 1) {
+          translateX = 0;
+          translateY = 0;
+        }
+        applyTransform(false);
+      }
+    }, { passive: false });
+
+    container.addEventListener('touchend', (e) => {
+      if (e.target.closest('#controls')) return;
+      if (e.touches.length === 0 && !hasMoved) {
+        enableWakeLock();
+        showControls();
+      }
+    });
+
+    // 5. 버튼 자동 숨김 제어 (3초 뒤 서서히 사라짐)
     function showControls() {
       controls.classList.add('visible');
       if (hideTimer) clearTimeout(hideTimer);
@@ -147,35 +243,28 @@
       }, 3000);
     }
 
-    function handleScreenTap(e) {
-      enableWakeLock();
-      showControls();
-    }
-
-    // 화면 꺼짐 방지
+    // 6. 화면 꺼짐 방지
     async function enableWakeLock() {
       try {
         if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
       } catch (err) {}
     }
 
-    // 최신 이미지 갱신
-    function fetchLatestImage(e) {
+    // 7. 새로고침 및 격자 토글
+    window.fetchLatestImage = function(e) {
       if (e) e.stopPropagation();
       showControls();
-      const img = document.getElementById('art-image');
       img.src = `${IMAGE_URL}?t=${Date.now()}`;
-    }
+    };
 
-    // 격자 토글
-    function toggleGrid(e) {
+    window.toggleGrid = function(e) {
       if (e) e.stopPropagation();
       showControls();
       const g = document.getElementById('grid');
       g.style.display = g.style.display === 'none' ? 'grid' : 'none';
-    }
+    };
 
-    // 첫 실행
+    // 초기 로딩
     fetchLatestImage();
   </script>
 </body>
